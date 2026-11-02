@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ChatRaid Dashboard</title>
+<style>
+  :root { --bg:#0e1020; --panel:#171a30; --line:#2b3055; --fg:#f2f4ff; --muted:#9aa3d0; --accent:#f0e442; --good:#009e73; --bad:#d55e00; --info:#56b4e9; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.4 "Segoe UI", system-ui, sans-serif; }
+  header { display:flex; align-items:center; gap:1em; padding:.8em 1.2em; border-bottom:1px solid var(--line); flex-wrap:wrap; }
+  h1 { font-size:1.2em; margin:0; } h1 span { color:var(--accent); }
+  #status { padding:.15em .7em; border-radius:1em; background:var(--line); font-weight:700; font-size:.85em; }
+  main { display:grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap:1em; padding:1em 1.2em; }
+  section { background:var(--panel); border:1px solid var(--line); border-radius:.7em; padding:1em; }
+  h2 { margin:0 0 .6em; font-size:.8em; letter-spacing:.12em; text-transform:uppercase; color:var(--muted); }
+  button, select, input { font:inherit; color:var(--fg); background:#222749; border:1px solid var(--line); border-radius:.45em; padding:.45em .8em; }
+  button { cursor:pointer; font-weight:700; } button:hover { background:#2d3461; }
+  button.go { background:var(--good); border-color:var(--good); } button.stop { background:var(--bad); border-color:var(--bad); }
+  button.kill { background:#b00020; border-color:#ff5370; width:100%; margin-top:.6em; font-size:1.05em; }
+  .row { display:flex; gap:.5em; flex-wrap:wrap; align-items:center; margin:.35em 0; }
+  .muted { color:var(--muted); } .big { font-size:1.15em; font-weight:800; }
+  table { width:100%; border-collapse:collapse; font-size:.9em; } td, th { padding:.25em .3em; text-align:left; border-bottom:1px solid var(--line); }
+  canvas { width:100%; height:120px; background:#10132a; border-radius:.4em; }
+  #log { height:150px; overflow:auto; font-size:.85em; background:#10132a; border-radius:.4em; padding:.5em; list-style:none; margin:0; }
+  textarea { width:100%; min-height:3.2em; background:#222749; color:var(--fg); border:1px solid var(--line); border-radius:.45em; padding:.45em; font:inherit; }
+  .pill { display:inline-block; padding:.05em .6em; border-radius:1em; background:var(--line); font-size:.8em; margin-right:.3em; }
+  #toast { position:fixed; bottom:1em; right:1em; background:#222749; border:1px solid var(--accent); padding:.6em 1em; border-radius:.5em; display:none; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Chat<span>Raid</span> · Streamer Dashboard</h1>
+  <span id="status">idle</span>
+  <span class="muted" id="conn">connecting…</span>
+</header>
+<main>
+  <section>
+    <h2>Control panel</h2>
+    <div class="row">
+      <button class="go" id="bStart">Start session</button>
+      <button id="bPause">Pause</button>
+      <button id="bResume">Resume</button>
+      <button class="stop" id="bEnd">End</button>
+    </div>
+    <div class="row"><button id="bSkipEvent">Skip current event</button></div>
+    <button class="kill" id="bKill">KILL SWITCH – stop AI events &amp; clear overlay</button>
+    <h2 style="margin-top:1em">Overlay URL (OBS browser source)</h2>
+    <div class="row"><input id="overlayUrl" readonly style="flex:1;min-width:200px"><button id="bCopy">Copy</button><button id="bRotate">Revoke &amp; new</button></div>
+    <div class="muted">Add as a Browser Source, 1920×1080, transparent background.</div>
+  </section>
+
+  <section>
+    <h2>Director view</h2>
+    <div id="plan" class="muted">No event planned yet.</div>
+    <div class="row">
+      <button class="go" id="bApprove">Approve now</button>
+      <button id="bPlanSkip">Skip plan</button>
+      <button id="bTrigger">Ask Director now</button>
+    </div>
+    <div class="row">
+      <label>Difficulty <input type="range" id="diff" min="1" max="10" value="3"> <b id="diffv">3</b></label>
+    </div>
+    <div class="row">
+      <label>Theme <select id="theme"><option>fantasy</option><option>scifi</option><option>spooky</option></select></label>
+      <label><input type="checkbox" id="auto" checked style="padding:0"> auto-start after 5s</label>
+    </div>
+    <div id="effectBox" style="display:none" class="row">
+      <span class="big" id="effectText"></span>
+      <button class="go" id="bEffYes">Accept challenge</button><button id="bEffNo">Decline</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>Chat pulse</h2>
+    <canvas id="chart" width="600" height="120"></canvas>
+    <div class="row" style="margin-top:.5em">
+      <span class="pill" id="pRate">0 msg/s</span><span class="pill" id="pUsers">0 active</span>
+      <span class="pill" id="pMood">neutral</span><span class="pill" id="pHype">hype 0%</span>
+      <span class="pill" id="pPart">participation 0%</span>
+    </div>
+    <div class="muted">Top topics: <span id="topics">—</span></div>
+    <div class="muted">Director: <span id="dstats">—</span></div>
+  </section>
+
+  <section>
+    <h2>Players</h2>
+    <table><thead><tr><th>#</th><th>Name</th><th>Class</th><th>Lvl</th><th>Pts</th></tr></thead><tbody id="players"></tbody></table>
+  </section>
+
+  <section>
+    <h2>Simulator (testing &amp; demo)</h2>
+    <div class="row">
+      <select id="scenario"><option>mixed</option><option>hype</option><option>quiet</option><option>spam</option><option>injection</option></select>
+      <input id="viewers" type="number" value="25" min="1" max="500" style="width:5em">
+      <button id="bSim">Start fake chat</button><button id="bSimStop">Stop</button>
+    </div>
+    <h2>Outgoing chat / activity</h2>
+    <ul id="log"></ul>
+  </section>
+
+  <section>
+    <h2>Settings</h2>
+    <div class="muted">Blocklist (one word per line)</div>
+    <textarea id="blocklist"></textarea>
+    <div class="row"><button id="bSave">Save settings</button></div>
+    <h2 style="margin-top:1em">Session feedback</h2>
+    <div class="row"><select id="rating"><option>5</option><option>4</option><option>3</option><option>2</option><option>1</option></select>
+      <input id="comment" placeholder="What worked? What broke?" style="flex:1"><button id="bFb">Send</button></div>
+    <div class="row"><button id="bRecap">Show recap</button></div>
+    <pre id="recap" class="muted" style="white-space:pre-wrap;margin:0"></pre>
+  </section>
+</main>
+<div id="toast"></div>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const token = decodeURIComponent(location.hash.slice(1)) || sessionStorage.getItem("admin") || prompt("Admin token (printed in the server console):") || "";
+  sessionStorage.setItem("admin", token);
+  const H = { "X-Admin-Token": token, "Content-Type": "application/json" };
+  const toast = (t) => { const e = $("toast"); e.textContent = t; e.style.display = "block"; setTimeout(() => e.style.display = "none", 2500); };
+  const api = async (method, path, body) => {
+    const r = await fetch(path, { method, headers: H, body: body ? JSON.stringify(body) : undefined });
+    if (!r.ok) { toast(method + " " + path + " → " + r.status); return null; }
+    return r.json();
+  };
+  let state = null, sid = 0;
+  const hist = [];
+
+  function drawChart() {
+    const c = $("chart"), g = c.getContext("2d"); g.clearRect(0, 0, c.width, c.height);
+    if (hist.length < 2) return;
+    const maxRate = Math.max(2, ...hist.map(h => h.msg_rate));
+    const line = (key, color, scale) => {
+      g.beginPath(); g.strokeStyle = color; g.lineWidth = 2;
+      hist.forEach((h, i) => { const x = i / (hist.length - 1) * c.width; const y = c.height - 8 - (scale(h[key]) * (c.height - 16)); i ? g.lineTo(x, y) : g.moveTo(x, y); });
+      g.stroke();
+    };
+    line("msg_rate", "#56b4e9", v => v / maxRate);
+    line("sentiment", "#f0e442", v => (v + 1) / 2);
+    g.fillStyle = "#9aa3d0"; g.font = "16px sans-serif"; g.fillText("blue: msg/s   yellow: mood", 8, 18);
+  }
+
+  function renderState(s) {
+    state = s;
+    $("status").textContent = s.status + (s.kill_switch ? " · KILLED" : "");
+    $("diff").value = s.difficulty; $("diffv").textContent = s.difficulty;
+    const tb = $("players"); while (tb.firstChild) tb.removeChild(tb.firstChild);
+    s.top.forEach((p, i) => {
+      const tr = document.createElement("tr");
+      [i + 1, p.name, p["class"], p.level, p.points].forEach(v => { const td = document.createElement("td"); td.textContent = v; tr.append(td); });
+      tb.append(tr);
+    });
+    if (!s.top.length) { const tr = document.createElement("tr"); const td = document.createElement("td"); td.colSpan = 5; td.className = "muted"; td.textContent = "Nobody has joined yet."; tr.append(td); tb.append(tr); }
+  }
+
+  function renderPlan(plan) {
+    const box = $("plan"); while (box.firstChild) box.removeChild(box.firstChild);
+    if (!plan) { box.textContent = "No event planned yet."; return; }
+    const p = plan.proposal;
+    const t = document.createElement("div"); t.className = "big"; t.textContent = p.title + "  (" + p.type + ", diff " + p.difficulty + ")";
+    const d = document.createElement("div"); d.textContent = p.description;
+    const m = document.createElement("div"); m.className = "muted";
+    m.textContent = "Why: " + plan.reason + " · source: " + plan.source + (plan.needs_approval ? " · WAITING FOR APPROVAL" : " · starts in " + plan.starts_in + "s") + (p.streamer_effect ? " · streamer effect: " + p.streamer_effect : "");
+    box.append(t, d, m);
+  }
+
+  function logLine(text) {
+    const li = document.createElement("li"); li.textContent = new Date().toLocaleTimeString() + "  " + text;
+    const ul = $("log"); ul.prepend(li); while (ul.children.length > 60) ul.removeChild(ul.lastChild);
+  }
+
+  function connect() {
+    const proto = location.protocol === "https:" ? "wss" : "ws";
+    const ws = new WebSocket(proto + "://" + location.host + "/ws/dashboard?token=" + encodeURIComponent(token));
+    ws.onopen = () => { $("conn").textContent = "live"; };
+    ws.onclose = () => { $("conn").textContent = "reconnecting…"; setTimeout(connect, 1500); };
+    ws.onmessage = (m) => {
+      const d = JSON.parse(m.data);
+      if (d.type === "state_update") renderState(d.state);
+      else if (d.type === "chat_pulse") {
+        const p = d.pulse; hist.push(p); if (hist.length > 60) hist.shift(); drawChart();
+        $("pRate").textContent = p.msg_rate + " msg/s"; $("pUsers").textContent = p.active_users + " active";
+        $("pMood").textContent = p.sentiment > .2 ? "positive" : p.sentiment < -.2 ? "negative" : "neutral";
+        $("pHype").textContent = "hype " + Math.round(p.hype * 100) + "%" + (p.spam ? " · SPAM" : "");
+        $("pPart").textContent = "participation " + Math.round(d.participation * 100) + "%";
+        $("topics").textContent = p.top_keywords.join(", ") || "—";
+        $("dstats").textContent = "LLM " + d.director.llm_ok + " · fallback " + d.director.fallback + " · rejected " + d.director.rejected;
+        renderPlan(d.plan);
+        $("effectBox").style.display = d.pending_effect ? "flex" : "none"; $("effectText").textContent = d.pending_effect || "";
+      } else if (d.type === "director_plan") renderPlan(d.plan);
+      else if (d.type === "chat_out") logLine("bot: " + d.text);
+    };
+  }
+
+  $("bStart").onclick = async () => { const r = await api("POST", "/sessions/start", { theme: $("theme").value, difficulty: +$("diff").value }); if (r) sid = r.session_id; };
+  $("bPause").onclick = () => api("POST", "/sessions/" + sid + "/pause");
+  $("bResume").onclick = () => api("POST", "/sessions/" + sid + "/resume");
+  $("bEnd").onclick = async () => { const r = await api("POST", "/sessions/" + sid + "/end"); if (r) $("recap").textContent = JSON.stringify(r.recap, null, 2); };
+  $("bKill").onclick = () => api("POST", "/kill");
+  $("bSkipEvent").onclick = () => state && state.event && api("POST", "/events/" + state.event.id + "/skip");
+  $("bApprove").onclick = () => api("POST", "/director/approve");
+  $("bPlanSkip").onclick = () => api("POST", "/director/skip");
+  $("bTrigger").onclick = () => api("POST", "/director/trigger");
+  $("bEffYes").onclick = () => api("POST", "/effect/approve");
+  $("bEffNo").onclick = () => api("POST", "/effect/deny");
+  $("diff").oninput = () => { $("diffv").textContent = $("diff").value; };
+  $("diff").onchange = () => api("PUT", "/settings", { difficulty: +$("diff").value });
+  $("theme").onchange = () => api("PUT", "/settings", { theme: $("theme").value });
+  $("auto").onchange = () => api("PUT", "/settings", { auto_approve: $("auto").checked });
+  $("bSave").onclick = async () => { const r = await api("PUT", "/settings", { blocklist: $("blocklist").value.split("\n").map(s => s.trim()).filter(Boolean) }); if (r) toast("Saved"); };
+  $("bSim").onclick = () => api("POST", "/simulate/start", { scenario: $("scenario").value, viewers: +$("viewers").value });
+  $("bSimStop").onclick = () => api("POST", "/simulate/stop");
+  $("bFb").onclick = async () => { const r = await fetch("/feedback", { method: "POST", headers: H, body: JSON.stringify({ role: "streamer", rating: +$("rating").value, comment: $("comment").value }) }); toast(r.ok ? "Thanks!" : "Failed"); };
+  $("bRecap").onclick = async () => { const r = await api("GET", "/recap"); if (r) $("recap").textContent = JSON.stringify(r, null, 2); };
+  $("bCopy").onclick = () => { navigator.clipboard.writeText($("overlayUrl").value); toast("Copied"); };
+  $("bRotate").onclick = async () => { const r = await api("POST", "/overlay/rotate"); if (r) { $("overlayUrl").value = location.origin + r.overlay_url; toast("Old overlay URL revoked"); } };
+
+  (async () => {
+    const s = await api("GET", "/settings");
+    if (s) {
+      $("overlayUrl").value = location.origin + s.overlay_url; $("blocklist").value = s.blocklist.join("\n");
+      $("theme").value = s.theme; $("auto").checked = s.auto_approve;
+    }
+    connect();
+  })();
+})();
+</script>
+</body>
+</html>

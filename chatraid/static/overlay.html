@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ChatRaid Overlay</title>
+<style>
+  /* Colorblind-safe (Okabe-Ito) palette, high contrast, edge-hugging layout */
+  :root {
+    --bg: rgba(10, 12, 24, .78); --fg: #ffffff; --muted: #c8cee6;
+    --danger: #e69f00; --hp: #d55e00; --good: #009e73; --info: #56b4e9; --accent: #f0e442; --violet: #cc79a7;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; width: 100%; height: 100%; background: transparent; overflow: hidden;
+    font-family: "Segoe UI", system-ui, -apple-system, sans-serif; color: var(--fg); }
+  #stage { position: relative; width: 100vw; height: 100vh; font-size: clamp(14px, 1.45vw, 28px); }
+  .card { background: var(--bg); border: 2px solid rgba(255,255,255,.28); border-radius: .7em; padding: .55em .8em;
+    text-shadow: 0 1px 2px #000; backdrop-filter: blur(2px); }
+  .label { font-size: .62em; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); font-weight: 700; }
+  .bar { height: 1.05em; background: rgba(255,255,255,.16); border-radius: .6em; overflow: hidden; margin-top: .3em; position: relative; }
+  .bar > i { display: block; height: 100%; width: 0; transition: width .35s ease; border-radius: .6em; }
+  .bar span { position: absolute; inset: 0; text-align: center; font-size: .7em; font-weight: 800; line-height: 1.5em; }
+
+  #banner { position: absolute; top: 1.2%; left: 50%; transform: translateX(-50%); width: 38%; text-align: center; min-width: 300px; }
+  #banner.hidden, #center.hidden { opacity: 0; pointer-events: none; }
+  #banner { transition: opacity .4s; }
+  #etype { color: var(--accent); }
+  #etitle { font-size: 1.5em; font-weight: 900; line-height: 1.15; }
+  #edesc { font-size: .8em; color: var(--muted); margin-top: .15em; }
+  #etimer { position: absolute; right: .7em; top: .45em; font-weight: 900; font-variant-numeric: tabular-nums; font-size: 1.15em; }
+  #ebar > i { background: var(--hp); }
+  #party { margin-top: .5em; } #party .bar > i { background: var(--good); }
+  #votes { display: none; gap: .5em; margin-top: .4em; } #votes div { flex: 1; text-align: center; font-weight: 800; padding: .2em; border-radius: .4em; background: rgba(255,255,255,.14); }
+
+  #right { position: absolute; right: 1%; top: 14%; width: 21%; min-width: 220px; display: flex; flex-direction: column; gap: .6em; }
+  #power .bar > i { background: var(--info); }
+  #mission .bar > i { background: var(--violet); }
+  #abilities { list-style: none; margin: .3em 0 0; padding: 0; font-size: .8em; }
+  #abilities li { display: flex; justify-content: space-between; padding: .12em 0; }
+  .locked { color: var(--muted); } .unlocked { color: var(--good); font-weight: 800; }
+  #effect { display: none; border-color: var(--danger); } #effect.on { display: block; animation: pulse 1.2s infinite; }
+  #status-chips { display: flex; gap: .4em; flex-wrap: wrap; font-size: .75em; font-weight: 800; }
+  .chip { padding: .1em .55em; border-radius: 1em; background: rgba(255,255,255,.16); display: none; }
+  .chip.on { display: inline-block; }
+
+  #left { position: absolute; left: 1%; top: 14%; width: 24%; min-width: 230px; }
+  #feed { list-style: none; margin: .3em 0 0; padding: 0; font-size: .8em; }
+  #feed li { padding: .15em 0; border-bottom: 1px solid rgba(255,255,255,.1); animation: slidein .35s ease; }
+  #feed li:first-child { color: var(--accent); font-weight: 700; }
+
+  #bottom { position: absolute; left: 1%; right: 1%; bottom: 1.5%; display: flex; gap: .6em; align-items: center; justify-content: space-between; }
+  #top5 { display: flex; gap: 1em; flex-wrap: wrap; font-size: .85em; }
+  #top5 b { color: var(--accent); }
+  #cmds { font-weight: 900; color: var(--accent); letter-spacing: .03em; }
+
+  #center { position: absolute; top: 40%; left: 50%; transform: translate(-50%, -50%); text-align: center; font-weight: 900;
+    font-size: 3.4em; text-shadow: 0 4px 18px #000, 0 0 3px #000; transition: opacity .3s; white-space: nowrap; }
+  #center.pop { animation: pop 2.2s ease-out forwards; }
+  #conn { position: absolute; top: .5%; left: .5%; font-size: .6em; padding: .1em .5em; border-radius: 1em; background: var(--danger); color: #000; font-weight: 800; display: none; }
+  @keyframes pop { 0% { transform: translate(-50%,-50%) scale(.3); opacity: 0; } 15% { transform: translate(-50%,-50%) scale(1.15); opacity: 1; }
+    80% { opacity: 1; } 100% { transform: translate(-50%,-50%) scale(1); opacity: 0; } }
+  @keyframes slidein { from { transform: translateX(-12px); opacity: 0; } to { transform: none; opacity: 1; } }
+  @keyframes pulse { 50% { box-shadow: 0 0 0 4px rgba(230,159,0,.45); } }
+  @media (prefers-reduced-motion: reduce), (max-width: 0) { * { animation: none !important; transition: none !important; } }
+  body.reduced * { animation: none !important; transition: none !important; }
+  @media (max-width: 900px) { #left, #right { display: none; } #banner { width: 94%; } #center { font-size: 2em; } }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="conn">reconnecting…</div>
+
+  <div id="banner" class="card hidden">
+    <div class="label"><span id="etype">EVENT</span></div>
+    <div id="etimer">0s</div>
+    <div id="etitle">—</div>
+    <div id="edesc"></div>
+    <div id="ebar" class="bar"><i></i><span></span></div>
+    <div id="votes"><div id="vA">A: 0</div><div id="vB">B: 0</div></div>
+    <div id="party"><div class="label">Party health</div><div class="bar"><i></i><span></span></div></div>
+  </div>
+
+  <div id="left" class="card">
+    <div class="label">Live feed</div>
+    <ul id="feed"></ul>
+  </div>
+
+  <div id="right">
+    <div id="power" class="card">
+      <div class="label">Community power</div>
+      <div class="bar"><i></i><span></span></div>
+      <ul id="abilities"></ul>
+    </div>
+    <div id="mission" class="card">
+      <div class="label">Mission</div>
+      <div id="mgoal" style="font-weight:800"></div>
+      <div class="bar"><i></i><span></span></div>
+    </div>
+    <div id="effect" class="card"><div class="label">Streamer challenge</div><div id="etext" style="font-weight:900"></div></div>
+    <div id="status-chips"><span class="chip" id="chip-boost"></span><span class="chip" id="chip-shield">SHIELD</span><span class="chip" id="chip-freeze"></span></div>
+  </div>
+
+  <div id="bottom" class="card">
+    <div id="top5"></div>
+    <div id="cmds"></div>
+  </div>
+
+  <div id="center" class="hidden"></div>
+</div>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const q = new URLSearchParams(location.search);
+  const token = q.get("token") || "";
+  if (q.get("reduced") === "1" || matchMedia("(prefers-reduced-motion: reduce)").matches) document.body.classList.add("reduced");
+  const POWER_MAX = 200;
+  let last = null, ws, retry = 1000, opened = false, fails = 0;
+
+  const setBar = (el, value, max, text) => {
+    const pct = max > 0 ? Math.max(0, Math.min(100, (value / max) * 100)) : 0;
+    el.querySelector("i").style.width = pct + "%";
+    el.querySelector("span").textContent = text;
+  };
+  const clear = (el) => { while (el.firstChild) el.removeChild(el.firstChild); };  // user text is only ever set via textContent
+
+  function pop(text, color) {
+    const c = $("center");
+    c.textContent = text; c.style.color = color || "#fff";
+    c.classList.remove("hidden", "pop"); void c.offsetWidth; c.classList.add("pop");
+  }
+
+  function render(s) {
+    const ev = s.event;
+    const active = ev && ev.status === "active";
+    $("banner").classList.toggle("hidden", !(active && s.status !== "ended"));
+    if (ev) {
+      $("etype").textContent = ev.type.replace("_", " ").toUpperCase();
+      $("etitle").textContent = ev.title;
+      $("edesc").textContent = ev.description;
+      $("etimer").textContent = ev.time_left + "s";
+      const isTwist = ev.type === "twist";
+      $("votes").style.display = isTwist ? "flex" : "none";
+      $("vA").textContent = "A: " + ev.votes.A; $("vB").textContent = "B: " + ev.votes.B;
+      $("ebar").style.display = isTwist ? "none" : "block";
+      if (ev.type === "enemy") setBar($("ebar"), ev.hp, ev.max_hp, ev.hp + " / " + ev.max_hp + " HP");
+      else setBar($("ebar"), ev.progress, ev.target, ev.progress + " / " + ev.target);
+    }
+    setBar($("party").querySelector(".bar"), s.party_hp, s.party_max_hp, s.party_hp + " / " + s.party_max_hp);
+
+    const nextAb = s.abilities.filter(a => !a.unlocked).sort((a, b) => a.cost - b.cost)[0];
+    const goal = nextAb ? nextAb.cost : POWER_MAX;
+    const ready = nextAb && s.community_power >= nextAb.cost;
+    setBar($("power").querySelector(".bar"), s.community_power, goal,
+      ready ? "READY: !unlock " + nextAb.key : s.community_power + (nextAb ? " / " + goal : ""));
+    const ul = $("abilities"); clear(ul);
+    s.abilities.forEach(a => {
+      const li = document.createElement("li"); li.className = a.unlocked ? "unlocked" : "locked";
+      const n = document.createElement("span"); n.textContent = (a.unlocked ? "✔ " : "🔒 ") + a.name;
+      const c = document.createElement("span"); c.textContent = a.unlocked ? "!use " + a.key : a.cost;
+      li.append(n, c); ul.append(li);
+    });
+    $("mgoal").textContent = s.mission.goal;
+    setBar($("mission").querySelector(".bar"), s.mission.progress, s.mission.target, s.mission.progress + " / " + s.mission.target);
+
+    $("effect").classList.toggle("on", !!s.effect);
+    if (s.effect) $("etext").textContent = s.effect.text + " (" + s.effect.left + "s)";
+    const chip = (id, on, text) => { const e = $(id); e.classList.toggle("on", on); if (text) e.textContent = text; };
+    chip("chip-boost", s.boost > 0, "BOOST x1.5 " + s.boost + "s");
+    chip("chip-shield", s.shield);
+    chip("chip-freeze", s.frozen > 0, "FROZEN " + s.frozen + "s");
+
+    const feed = $("feed"); clear(feed);
+    s.feed.slice(0, 7).forEach(t => { const li = document.createElement("li"); li.textContent = t; feed.append(li); });
+    if (!s.feed.length) { const li = document.createElement("li"); li.textContent = s.status === "running" ? "Type !join to play!" : "Waiting for the streamer…"; feed.append(li); }
+
+    const top = $("top5"); clear(top);
+    s.top.forEach((p, i) => {
+      const d = document.createElement("span");
+      const b = document.createElement("b"); b.textContent = "#" + (i + 1) + " ";
+      d.append(b, document.createTextNode(p.name + " · " + p.points)); top.append(d);
+    });
+    if (!s.top.length) top.textContent = s.players + " raiders";
+    $("cmds").textContent = s.commands;
+  }
+
+  function transitions(prev, s) {
+    if (!prev) return;
+    const pe = prev.event, ne = s.event;
+    if (ne && (!pe || pe.id !== ne.id) && ne.status === "active") {
+      pop(ne.type === "enemy" ? "⚔ " + ne.title + " appears!" : ne.type === "twist" ? "🎲 TWIST!" : "❗ " + ne.title, "#f0e442");
+    } else if (ne && pe && pe.id === ne.id && pe.status === "active" && ne.status !== "active") {
+      if (ne.status === "won") pop("VICTORY!", "#009e73");
+      else if (ne.status === "lost") pop("DEFEAT…", "#e69f00");
+    }
+    s.abilities.forEach((a, i) => { if (a.unlocked && !prev.abilities[i].unlocked) pop("UNLOCKED: " + a.name, "#56b4e9"); });
+  }
+
+  function connect() {
+    const proto = location.protocol === "https:" ? "wss" : "ws";
+    ws = new WebSocket(proto + "://" + location.host + "/ws/overlay/" + encodeURIComponent(token));
+    ws.onmessage = (m) => {
+      const msg = JSON.parse(m.data);
+      if (msg.type === "state_update") { transitions(last, msg.state); last = msg.state; render(msg.state); }
+    };
+    ws.onopen = () => { opened = true; fails = 0; $("conn").style.display = "none"; retry = 1000; };
+    ws.onclose = (e) => {
+      // A rejected handshake (bad/revoked token) never opens, so the browser reports it as a plain failure.
+      if (!opened) fails++;
+      opened = false;
+      $("conn").style.display = "block";
+      const bad = e.code === 4403 || fails >= 4;
+      $("conn").textContent = bad ? "invalid or revoked overlay token - copy a fresh URL from the dashboard" : "reconnecting…";
+      setTimeout(connect, bad ? 15000 : retry); retry = Math.min(10000, retry * 1.6);
+    };
+  }
+  setInterval(() => ws && ws.readyState === 1 && ws.send("ping"), 20000);
+  connect();
+})();
+</script>
+</body>
+</html>
